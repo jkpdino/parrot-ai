@@ -1,0 +1,31 @@
+model:
+  dimension: 512
+  heads: 32
+  rank: 512
+  layers: 16
+  max_seq_len: 512
+  vocab_size: 50257
+  attention_priority: 1
+  dropout: 0.1
+  bias: true
+
+training:
+  optimizer: adamw
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  gradient_clip: 1.0
+
+  max_steps: 100000
+  save_every: 1
+  eval_every: 1
+  eval_batches: 100
+  log_every: 1
+
+  dataset_name: wikitext
+  dataset_split: train
+  eval_split: validation
+  text_column: text
+  train_batch_size: 32
+  eval_batch_size: 64
+  max_length: 512
