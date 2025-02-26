@@ -257,6 +257,45 @@ class Trainer:
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
+    def save_checkpoint(self):
+        """Saves model checkpoint and training state"""
+        checkpoint = {
+            'step': self.step,
+            'model_state': self.model.state_dict(),
+            'optimizer_state': self.optimizer.state_dict(),
+            'scaler_state': self.scaler.state_dict(),
+            'tokens_seen': self.tokens_seen,
+            'metrics': self.metrics.to_dict(),
+            'config': self.config,
+            'model_config': self.model_config,
+        }
+        
+        # Create checkpoint directory if it doesn't exist
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save latest checkpoint
+        latest_path = self.run_dir / 'checkpoint_latest.pt'
+        torch.save(checkpoint, latest_path)
+        
+        # Save numbered checkpoint every save_every steps
+        if self.step % self.config.save_every == 0:
+            numbered_path = self.run_dir / f'checkpoint_{self.step:06d}.pt'
+            torch.save(checkpoint, numbered_path)
+    
+    def load_checkpoint(self, checkpoint_path: Path):
+        """Loads model checkpoint and training state"""
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+        self.scaler.load_state_dict(checkpoint['scaler_state'])
+        
+        self.step = checkpoint['step']
+        self.tokens_seen = checkpoint['tokens_seen']
+        self.metrics.from_dict(checkpoint['metrics'])
+        
+        print(f"Resumed from checkpoint at step {self.step}")
+
 def main():
     parser = argparse.ArgumentParser(description='Train ParrotLM model')
     parser.add_argument('--config', type=str, required=True, help='Path to training config YAML')
