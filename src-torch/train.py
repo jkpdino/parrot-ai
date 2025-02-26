@@ -119,6 +119,13 @@ class Trainer:
         )
         self.train_dataset.prepare_dataset()
         train_loader = self.train_dataset.get_dataloader(shuffle=True)
+
+        self.eval_dataset.load_from_huggingface(
+            self.config.dataset_name,
+            split="validation",
+            text_column=self.config.text_column
+        )
+        self.eval_dataset.prepare_dataset()
         
         self.training_start_time = time.time()
         self.last_log_time = self.training_start_time
