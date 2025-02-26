@@ -164,6 +164,7 @@ class Trainer:
                     #eval_metrics = self.evaluate_generation()
                     #--self.metrics.add_eval_step(**eval_metrics)
                     sample_text = self.generate_sample(sample_tokens)
+                    print (f"Sample: {sample_text}")
                     self.metrics.add_generation_sample(self.step, sample_text)
                     self.save_checkpoint()
                 
