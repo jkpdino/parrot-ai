@@ -66,6 +66,21 @@ class TrainingMetrics:
             'timestamp': time.time()
         })
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the metrics instance to a dictionary representation."""
+        return {
+            'train_losses': self.train_losses,
+            'eval_losses': self.eval_losses,
+            'learning_rates': self.learning_rates,
+            'steps': self.steps,
+            'timestamps': self.timestamps,
+            'best_eval_loss': self.best_eval_loss,
+            'train_perplexities': self.train_perplexities,
+            'eval_perplexities': self.eval_perplexities,
+            'tokens_per_second': self.tokens_per_second,
+            'generation_samples': self.generation_samples
+        }
+
     def save(self, run_dir: Path):
         metrics_data = {
             # Existing metrics
