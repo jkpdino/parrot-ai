@@ -188,6 +188,13 @@ class Trainer:
         start_time = time.time()
         total_tokens = 0
 
+        if not hasattr(self.eval_dataset, 'dataset') or len(self.eval_dataset) == 0:
+            self.eval_dataset.load_from_huggingface(
+                self.config.dataset_name,
+                split="validation",
+                text_column=self.config.text_column
+            )
+            self.eval_dataset.prepare_dataset()
         train_loader = self.eval_dataset.get_dataloader(shuffle=True)
 
 
