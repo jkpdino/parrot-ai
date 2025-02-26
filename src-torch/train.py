@@ -187,31 +187,24 @@ class Trainer:
         
         start_time = time.time()
         total_tokens = 0
-        
-        eval_batch = next(self.eval_dataset.get_batch_iterator(shuffle=True))
-        input_ids, target_ids = [x.to(self.device) for x in eval_batch]
-        
-        for i in range(min(num_samples, len(input_ids))):
-            seq_len = input_ids[i].size(0)
-            prompt_len = seq_len // 2
-            prompt = input_ids[i:i+1, :prompt_len]
-            
-            generated = self.model.generate(
-                prompt,
-                max_length=seq_len,
-                temperature=0.8
-            )
-            
-            target = target_ids[i:i+1, prompt_len:]
-            pred = self.model(generated[:, :prompt_len])[:, -target.size(1):]
+
+        train_loader = self.eval_dataset.get_dataloader(shuffle=True)
+
+
+        for i, batch in enumerate(train_loader):
+            if i >= num_samples:
+                break
+            input_ids, target_ids = [x.to(self.device) for x in batch]
+                    
+            logits = self.model(input_ids)
             loss = nn.functional.cross_entropy(
-                pred.view(-1, pred.size(-1)),
-                target.view(-1),
+                logits.view(-1, logits.size(-1)),
+                target_ids.view(-1),
                 ignore_index=self.tokenizer.pad_token_id
             )
-            
+
             metrics['loss'] += loss.item()
-            total_tokens += target.numel()
+            total_tokens += input_ids.numel()
         
         # Average metrics
         metrics['loss'] /= num_samples
