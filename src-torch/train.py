@@ -161,8 +161,8 @@ class Trainer:
                 )
                 
                 if self.step % self.config.eval_every == 0:
-                    eval_metrics = self.evaluate_generation()
-                    self.metrics.add_eval_step(**eval_metrics)
+                    #eval_metrics = self.evaluate_generation()
+                    #--self.metrics.add_eval_step(**eval_metrics)
                     sample_text = self.generate_sample(sample_tokens)
                     self.metrics.add_generation_sample(self.step, sample_text)
                     self.save_checkpoint()
