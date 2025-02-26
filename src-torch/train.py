@@ -188,10 +188,6 @@ class Trainer:
         start_time = time.time()
         total_tokens = 0
 
-        # Ensure the eval dataset is prepared
-        if not self.eval_dataset.is_prepared:
-            self.eval_dataset.prepare_dataset()
-
         train_loader = self.eval_dataset.get_dataloader(shuffle=True)
 
 
