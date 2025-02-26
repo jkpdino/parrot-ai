@@ -169,6 +169,50 @@ class Trainer:
         self.save_checkpoint()
         pbar.close()
 
+    @torch.no_grad()
+    def evaluate_generation(self, num_samples: int = 5) -> Dict[str, float]:
+        """Enhanced evaluation with multiple metrics"""
+        metrics = {
+            'loss': 0.0,
+            'perplexity': 0.0,
+            'tokens_per_sec': 0.0
+        }
+        
+        start_time = time.time()
+        total_tokens = 0
+        
+        eval_batch = next(self.eval_dataset.get_batch_iterator(shuffle=True))
+        input_ids, target_ids = [x.to(self.device) for x in eval_batch]
+        
+        for i in range(min(num_samples, len(input_ids))):
+            seq_len = input_ids[i].size(0)
+            prompt_len = seq_len // 2
+            prompt = input_ids[i:i+1, :prompt_len]
+            
+            generated = self.model.generate(
+                prompt,
+                max_length=seq_len,
+                temperature=0.8
+            )
+            
+            target = target_ids[i:i+1, prompt_len:]
+            pred = self.model(generated[:, :prompt_len])[:, -target.size(1):]
+            loss = nn.functional.cross_entropy(
+                pred.view(-1, pred.size(-1)),
+                target.view(-1),
+                ignore_index=self.tokenizer.pad_token_id
+            )
+            
+            metrics['loss'] += loss.item()
+            total_tokens += target.numel()
+        
+        # Average metrics
+        metrics['loss'] /= num_samples
+        metrics['perplexity'] = math.exp(metrics['loss'])
+        metrics['tokens_per_sec'] = total_tokens / (time.time() - start_time)
+        
+        return metrics
+
     @torch.no_grad
     def generate(self, 
                 text: str, 
