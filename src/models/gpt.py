@@ -1,14 +1,15 @@
 """
 inputs:
-  T: mx.array - (b, n)
+  T: torch.Tensor - (b, n)
 
 outputs:
-  T: mx.array - (b, n, w)
+  T: torch.Tensor - (b, n, w)
 """
 
 import math
-import mlx.core as mx
-import mlx.nn as nn
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from .config import GPTConfig
 from .block import LowRankAttentionBlock
@@ -24,38 +25,41 @@ class GPT(nn.Module):
         self.embeddings = nn.Embedding(config.vocab_size, config.dimension)
         self.pos_embeddings = SinusoidalPositionalEmbedding(config)
         
-        # Use proper module container
-        self.decoders = nn.Sequential(*[
+        self.decoders = nn.ModuleList([
             LowRankAttentionBlock(config) for _ in range(config.layers)
         ])
         
         self.final_norm = nn.LayerNorm(config.dimension)
         self.unembed = nn.Linear(config.dimension, config.vocab_size)
         
-        # Cache for attention
-        self.cached_mask = None
+        # Register buffer for attention mask
+        self.register_buffer('cached_mask', None)
         self.config = config
+        
+        # Gradient checkpointing flag
+        self.gradient_checkpointing = False
 
-    def generate_token(self, tokens: mx.array, temperature: float = 1.0) -> mx.array:
+    def gradient_checkpointing_enable(self):
+        """Enable gradient checkpointing for memory efficiency."""
+        self.gradient_checkpointing = True
+        
+    def gradient_checkpointing_disable(self):
+        """Disable gradient checkpointing."""
+        self.gradient_checkpointing = False
+
+    @torch.no_grad()
+    def generate_token(self, tokens: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
         if temperature <= 0:
             raise ValueError("Temperature must be positive")
             
-        # Scale logits before softmax for better numerical stability
         logits = self(tokens, use_mask=True)
         next_token_logits = logits[:, -1, :]
         
-        # Apply temperature scaling before softmax
         scaled_logits = next_token_logits / max(temperature, 1e-5)
-        
-        # Optional: Add top-k sampling
-        # top_k = 40
-        # v, _ = mx.topk(scaled_logits, min(top_k, scaled_logits.shape[-1]))
-        # scaled_logits = mx.where(scaled_logits < v[:, [-1]], float('-inf'), scaled_logits)
-        
-        probs = mx.softmax(scaled_logits, axis=-1)
-        return mx.random.categorical(probs)
+        probs = F.softmax(scaled_logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1).squeeze(-1)
 
-    def __call__(self, T: mx.array, use_mask: bool = False):
+    def forward(self, T: torch.Tensor, use_mask: bool = False):
         if T.ndim != 2:
             raise ValueError(f"Expected 2D input tensor, got shape {T.shape}")
             
@@ -64,45 +68,62 @@ class GPT(nn.Module):
         
         if use_mask:
             if self.cached_mask is None or self.cached_mask.shape[1] != T.shape[1]:
-                self.cached_mask = self._create_causal_mask(T.shape[1])
+                self.cached_mask = self._create_causal_mask(T.shape[1]).to(T.device)
             mask = self.cached_mask
         else:
             mask = None
+        
+        if self.gradient_checkpointing and self.training:
+            # Apply gradient checkpointing to each decoder layer
+            for i, decoder in enumerate(self.decoders):
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+                    return custom_forward
+                
+                x = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(decoder),
+                    x, mask,
+                    preserve_rng_state=False
+                )
+        else:
+            # Standard forward pass
+            for decoder in self.decoders:
+                x = decoder(x, mask=mask)
             
-        x = self.decoders(x, mask=mask)
         x = self.final_norm(x)
         x = self.unembed(x)
         
         return x
 
     def _create_causal_mask(self, length: int):
-        mask = nn.MultiHeadAttention.create_additive_causal_mask(length)
-        return mask.astype(self.embeddings.weight.dtype)
+        mask = torch.triu(torch.ones(length, length), diagonal=1)
+        return mask.masked_fill(mask == 1, float('-inf'))
 
+    @torch.no_grad()
     def generate(self, 
-                initial_tokens: mx.array, 
+                initial_tokens: torch.Tensor, 
                 max_length: int = 100, 
                 temperature: float = 1.0,
-                stop_token: int = None) -> mx.array:
+                stop_token: int = None) -> torch.Tensor:
         """Generate complete sequences.
         
         Args:
-            initial_tokens: mx.array of shape (batch_size, initial_sequence_length)
+            initial_tokens: torch.Tensor of shape (batch_size, initial_sequence_length)
             max_length: maximum number of tokens to generate
             temperature: sampling temperature
             stop_token: optional token ID to stop generation when encountered
             
         Returns:
-            mx.array of shape (batch_size, final_sequence_length)
+            torch.Tensor of shape (batch_size, final_sequence_length)
         """
         current_tokens = initial_tokens
         
         for _ in range(max_length):
             next_token = self.generate_token(current_tokens, temperature)
-            current_tokens = mx.concatenate([current_tokens, next_token[:, None]], axis=1)[:, -self.config.max_seq_len:]
+            current_tokens = torch.cat([current_tokens, next_token.unsqueeze(1)], dim=1)[:, -self.config.max_seq_len:]
             
-            # Stop if all sequences have generated the stop token
-            if stop_token is not None and mx.all(next_token == stop_token):
+            if stop_token is not None and (next_token == stop_token).all():
                 break
                 
         return current_tokens

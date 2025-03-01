@@ -14,6 +14,14 @@ class GPTConfig:
 
     dropout: float = 0.0
     bias: bool = True
+    
+    # Mixture of Experts parameters
+    use_moe: bool = False
+    num_experts: int = 8
+    num_experts_per_token: int = 2
+    expert_capacity_factor: float = 1.0
+    moe_jitter_eps: float = 0.0
+    moe_dropout: float = 0.0
 
     @classmethod
     def from_yaml(cls, yaml_path):

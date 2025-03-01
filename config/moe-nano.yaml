@@ -1,0 +1,52 @@
+model:
+  dimension: 256
+  heads: 32
+  rank: 256
+  layers: 4
+  max_seq_len: 512
+  vocab_size: 50257
+  attention_priority: 1
+  dropout: 0.1
+  bias: true
+
+  # Mixture of Experts configuration
+  use_moe: true
+  num_experts: 4
+  num_experts_per_token: 2
+  expert_capacity_factor: 1.25
+  moe_jitter_eps: 0.1
+  moe_dropout: 0.1
+
+training:
+  # Optimization
+  optimizer: adamw
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  gradient_clip: 1.0
+  min_lr: 1e-5
+  use_lr_schedule: true
+  grad_accumulation_steps: 1
+
+  # Training loop
+  max_steps: 100000
+  save_every: 1000
+  eval_every: 500
+  eval_batches: 100
+  log_every: 10
+
+  # Monitoring
+  num_eval_samples: 5
+  eval_max_tokens: 200
+  eval_temperature: 0.8
+
+  # Dataset configuration
+  dataset:
+    name: wikitext
+    config: wikitext-2-v1
+    train_split: train
+    eval_split: validation
+    text_column: text
+    train_batch_size: 16
+    eval_batch_size: 64
+    max_length: 512

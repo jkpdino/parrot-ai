@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-import mlx.core as mx
+import torch
 from typing import Optional
 
 from models.gpt import GPT
@@ -10,8 +10,6 @@ from training.tokenize import create_tokenizer
 
 def load_model(checkpoint_path: str, model_name: str) -> tuple[GPT, TrainingConfig]:
     """Load model and config from checkpoint."""
-    #checkpoint_path = Path(checkpoint_path)
-    
     # Load the config from the same directory
     config_path = Path("config") / (model_name + ".yaml")
     config = TrainingConfig.from_yaml(config_path)
@@ -20,8 +18,9 @@ def load_model(checkpoint_path: str, model_name: str) -> tuple[GPT, TrainingConf
     model = GPT(GPTConfig.from_yaml(model_name))
     
     # Load weights
-    checkpoint = mx.load(checkpoint_path)
-    model.update(checkpoint['model_state'])
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state'])
+    model.eval()  # Set to evaluation mode
     
     return model, config
 
@@ -34,9 +33,9 @@ def generate_response(
 ) -> str:
     """Generate a response for the given prompt."""
     try:
-        tokens = mx.array([tokenizer.encode(prompt)])
+        tokens = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long)
         
-        with mx.stop_gradient():
+        with torch.no_grad():
             generated = model.generate(
                 tokens,
                 max_length=max_length,

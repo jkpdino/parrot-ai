@@ -1,0 +1,52 @@
+model:
+  dimension: 1024
+  heads: 16
+  rank: 256
+  layers: 16
+  max_seq_len: 1024
+  vocab_size: 50257
+  attention_priority: 2
+  dropout: 0.1
+  bias: true
+
+training:
+  optimizer: adamw
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  warmup_steps: 2000
+  gradient_clip: 1.0
+
+  max_steps: 10000
+  save_every: 1000
+  eval_every: 1000
+  eval_batches: 100
+  log_every: 1
+  grad_accumulation_steps: 8
+
+  # Dataset configuration
+  dataset:
+    name: wikitext
+    config: wikitext-2-v1 # Specific dataset configuration
+    train_split: train
+    eval_split: validation
+    text_column: text
+    train_batch_size: 16
+    eval_batch_size: 16
+    max_length: 1024
+
+  # Alternative datasets examples:
+  # For OpenWebText:
+  # dataset:
+  #   name: openwebtext
+  #   config: null
+  #   train_split: train
+  #   eval_split: validation
+  #   text_column: text
+
+  # For Pile:
+  # dataset:
+  #   name: EleutherAI/pile
+  #   config: null
+  #   train_split: train
+  #   eval_split: validation
+  #   text_column: text

@@ -1,6 +1,7 @@
 import math
-import mlx.core as mx
-import mlx.nn as nn
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from .config import GPTConfig
 
@@ -38,46 +39,79 @@ class LowRankAttention(nn.Module):
         if config.rank > config.dimension:
             raise ValueError(f"Rank ({config.rank}) should not exceed dimension ({config.dimension})")
 
-        self.q_proj = nn.Linear(config.dimension, config.rank)
-        self.k_proj = nn.Linear(config.dimension, config.rank)
-        self.v_proj = nn.Linear(config.dimension, config.rank)
+        # Use a single projection matrix for better memory efficiency
+        self.qk_proj = nn.Linear(config.dimension, 2 * config.rank, bias=config.bias)
+        self.v_proj = nn.Linear(config.dimension, config.dimension, bias=config.bias)  # Project to full dimension
 
         self.dropout = nn.Dropout(config.dropout)
+        self.scale = 1.0 / math.sqrt(config.rank // config.heads)
         
         self.config = config
+        self.head_size = config.rank // config.heads
+        self.d_head = config.dimension // config.heads
+        
+        # Register buffers to avoid recreating tensors
+        self.register_buffer('_att_buffer', None, persistent=False)
 
-    def __call__(self, x: mx.array, mask: mx.array = None) -> mx.array:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         b, n, d = x.shape
         if d != self.config.dimension:
             raise ValueError(f"Input dimension {d} doesn't match config dimension {self.config.dimension}")
-        if mask is not None and mask.shape != (b, self.config.heads, n, n):
-            raise ValueError(f"Mask shape {mask.shape} doesn't match expected shape {(b, self.config.heads, n, n)}")
+        if mask is not None and mask.shape != (n, n):
+            raise ValueError(f"Mask shape {mask.shape} doesn't match expected shape {(n, n)}")
 
-        r = self.config.rank
+        # Project q and k together for better memory efficiency
+        qk = self.qk_proj(x)
+        q, k = qk.chunk(2, dim=-1)
+        
+        # Apply layer norm to stabilize q and k
+        q_norm = torch.norm(q, p=2, dim=-1, keepdim=True).clamp(min=1e-6)
+        k_norm = torch.norm(k, p=2, dim=-1, keepdim=True).clamp(min=1e-6)
+        q = q / q_norm
+        k = k / k_norm
+        
+        # Reshape for multi-head attention
+        q = q.view(b, n, self.config.heads, self.head_size).transpose(1, 2)
+        k = k.view(b, n, self.config.heads, self.head_size).transpose(1, 2)
+        
+        # Project v to full dimension and split into heads
+        v = self.v_proj(x).view(b, n, self.config.heads, self.d_head).transpose(1, 2)
 
-        # Project x to q, k, v
-        # Split into heads
-        # Transpose to shape (b, h, n, r//h)
-        q = self.q_proj(x).reshape(b, n, self.config.heads, -1).transpose(0, 2, 1, 3)
-        k = self.k_proj(x).reshape(b, n, self.config.heads, -1).transpose(0, 2, 1, 3)
-        v = self.v_proj(x).reshape(b, n, self.config.heads, -1).transpose(0, 2, 1, 3)
+        # Compute attention scores - use bmm for better memory efficiency
+        # Reshape tensors to combine batch and head dimensions
+        q = q.reshape(b * self.config.heads, n, self.head_size)
+        k = k.reshape(b * self.config.heads, n, self.head_size)
+        v = v.reshape(b * self.config.heads, n, self.d_head)
 
-        head_size = r // self.config.heads
-
-        # perform the attention mechanism
-        unscaled_att = q @ k.transpose(2, 3)
-        att = unscaled_att * (1.0 / math.sqrt(head_size))
+        # Compute attention scores efficiently - avoid using out parameter for gradient checkpointing compatibility
+        att = torch.bmm(q, k.transpose(1, 2))
+        att = att * self.scale  # Scale instead of in-place scaling
+        
+        # Clamp attention scores to prevent extreme values
+        att = torch.clamp(att, min=-1e4, max=1e4)
 
         if mask is not None:
-          att = att + mask
+            # Expand mask for batch and heads
+            mask = mask.unsqueeze(0).expand(b * self.config.heads, -1, -1)
+            att = att + mask  # Add instead of in-place addition
 
-        # perform normalization and dropout
-        att = self.dropout(mx.softmax(att, axis=-1))
+        # Apply softmax and dropout with numerical stability
+        att = F.softmax(att, dim=-1)
+        
+        # Check for NaN values and replace with zeros
+        if torch.isnan(att).any():
+            att = torch.where(torch.isnan(att), torch.zeros_like(att), att)
+            # Renormalize
+            att_sum = att.sum(dim=-1, keepdim=True).clamp(min=1e-6)
+            att = att / att_sum
+            
+        att = self.dropout(att)
+        
+        # Apply attention to values
+        y = torch.bmm(att, v)
 
-        # perform the weighted sum
-        y = att @ v
-
-        # transpose the heads back to the original shape
-        y = y.transpose(1, 2).reshape(b, n, d)
-
+        # Restore original shape
+        y = y.view(b, self.config.heads, n, self.d_head)
+        y = y.transpose(1, 2).contiguous().view(b, n, d)
+        
         return y

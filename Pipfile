@@ -1,0 +1,29 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+torch = "*"
+numpy = "*"
+tqdm = "*"
+pyyaml = "*"
+accelerate = "*"
+deepspeed = "*"
+transformers = "*"
+matplotlib = "*"
+ipykernel = "*"
+
+[requires]
+python_version = "3.10"
+
+[scripts]
+train = "python src/train.py"
+train_distributed = "accelerate launch --multi_gpu --num_processes=8 src/train.py"
+train_distributed_2gpu = "accelerate launch --multi_gpu --num_processes=2 src/train.py"
+train_4090 = "python src/train.py"
+train_dual_4090 = "accelerate launch --multi_gpu --num_processes=2 src/train_distributed.py"
+chat = "python src/chat.py"
+calculate_model_size = "python src/calculate_model_size.py" 
