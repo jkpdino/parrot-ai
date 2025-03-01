@@ -76,7 +76,7 @@ class ParrotDataset(TorchDataset):
         return len(self.processed_tokens)
 
     def __getitem__(self, idx):
-        tokens = self.processed_tokens[idx]
+        tokens = self.processed_tokens[idx][:self.max_length]
         input_ids = torch.tensor(tokens, dtype=torch.long)
         # Create targets by shifting input
         targets = torch.roll(input_ids, -1)
