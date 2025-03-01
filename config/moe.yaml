@@ -1,9 +1,9 @@
 model:
-  dimension: 1536
+  dimension: 1024
   heads: 32
   rank: 512
   layers: 16
-  max_seq_len: 1024
+  max_seq_len: 512
   vocab_size: 50257
   attention_priority: 2
   dropout: 0.1
@@ -47,6 +47,6 @@ training:
     train_split: train
     eval_split: validation
     text_column: text
-    train_batch_size: 16
+    train_batch_size: 8
     eval_batch_size: 64
-    max_length: 1024
+    max_length: 512
