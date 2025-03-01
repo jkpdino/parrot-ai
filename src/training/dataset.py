@@ -65,10 +65,12 @@ class ParrotDataset(TorchDataset):
         for example in self.dataset:
             tokens = self.tokenizer.encode(example[self.text_column])
             # Split into chunks of max_length
-            for i in range(0, len(tokens) - self.max_length + 1, self.max_length):
+            for i in range(0, len(tokens), self.max_length):  # Changed to step by max_length without -1
                 chunk = tokens[i:i + self.max_length]
-                if len(chunk) == self.max_length:
-                    self.processed_tokens.append(chunk)
+                # Pad shorter chunks to max_length if needed
+                if len(chunk) < self.max_length:
+                    chunk = chunk + [self.tokenizer.pad_token_id] * (self.max_length - len(chunk))
+                self.processed_tokens.append(chunk)
 
     def __len__(self):
         return len(self.processed_tokens)
@@ -98,57 +100,3 @@ class ParrotDataset(TorchDataset):
         return {
             'tokens': tokens
         }
-
-    def get_batch_iterator(self, shuffle: bool = True) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
-        """Get a batch iterator for MLX training, returning input_ids and targets."""
-        if not hasattr(self, 'processed_dataset'):
-            raise ValueError("Dataset not prepared. Call prepare_dataset first.")
-
-        def chunks(lst, n):
-            """Yield successive n-sized chunks from lst."""
-            for i in range(0, len(lst), n):
-                yield lst[i:i + n]
-
-        def generate_batches():
-            examples = list(self.processed_dataset)
-            if shuffle:
-                np.random.shuffle(examples)
-
-            current_batch = []
-            for example in examples:
-                tokens = example['tokens']
-                token_chunks = list(chunks(tokens, self.max_length))
-
-                for chunk in token_chunks:
-                    # Pad if necessary
-                    if len(chunk) < self.max_length:
-                        chunk = chunk + [self.tokenizer.pad_token_id] * (self.max_length - len(chunk))
-                    current_batch.append(chunk)
-
-                    if len(current_batch) == self.batch_size:
-                        batch_array = np.array(current_batch, dtype=np.int32)
-                        input_ids = mx.array(batch_array)
-                        # Create targets: shift the tokens one position to the left
-                        target_array = batch_array.copy()
-                        target_array[:, :-1] = batch_array[:, 1:]
-                        target_array[:, -1] = self.tokenizer.pad_token_id  # set last token target to pad
-                        targets = mx.array(target_array)
-                        
-                        yield input_ids, targets
-                        current_batch = []
-
-            # Handle any remaining examples as a final batch
-            if current_batch:
-                while len(current_batch) < self.batch_size:
-                    current_batch.append([self.tokenizer.pad_token_id] * self.max_length)
-                
-                batch_array = np.array(current_batch, dtype=np.int32)
-                input_ids = mx.array(batch_array)
-                target_array = batch_array.copy()
-                target_array[:, :-1] = batch_array[:, 1:]
-                target_array[:, -1] = self.tokenizer.pad_token_id
-                targets = mx.array(target_array)
-                
-                yield input_ids, targets
-
-        return generate_batches()
