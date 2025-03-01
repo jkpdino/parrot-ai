@@ -83,7 +83,7 @@ class DistributedTrainer:
             raise ValueError(f"Unsupported optimizer: {self.config.optimizer}")
         
         # Create learning rate scheduler
-        if self.config.use_lr_schedule:
+        if hasattr(self.config, 'use_lr_schedule') and self.config.use_lr_schedule:
             self.lr_scheduler = self.get_lr_scheduler()
         else:
             self.lr_scheduler = None
@@ -148,7 +148,7 @@ class DistributedTrainer:
         self.accelerator.backward(loss)
         
         if (self.step + 1) % self.config.grad_accumulation_steps == 0:
-            if self.config.max_grad_norm > 0:
+            if hasattr(self.config, 'max_grad_norm') and self.config.max_grad_norm > 0:
                 self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
             self.optimizer.step()
             if self.lr_scheduler is not None:
@@ -278,19 +278,30 @@ class DistributedTrainer:
         
         self.step = checkpoint['step']
         self.tokens_seen = checkpoint['tokens_seen']
-        self.metrics.from_dict(checkpoint['metrics'])
+        
+        # Load metrics
+        if 'metrics' in checkpoint:
+            metrics_dict = checkpoint['metrics']
+            # Create a new metrics instance
+            self.metrics = TrainingMetrics()
+            # Update fields
+            for key, value in metrics_dict.items():
+                if hasattr(self.metrics, key):
+                    setattr(self.metrics, key, value)
         
         print(f"Resumed from checkpoint at step {self.step}")
 
 def main():
     parser = argparse.ArgumentParser(description='Train ParrotLM model with distributed training')
     parser.add_argument('--config', type=str, required=True, help='Path to training config YAML')
+    parser.add_argument('--model_config', type=str, help='Path to model config YAML (defaults to training config name)')
     parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--deepspeed', type=str, default="ds_config.json", help='Path to DeepSpeed config')
+    parser.add_argument('--deepspeed', type=str, default=None, help='Path to DeepSpeed config')
     parser.add_argument('--memory_efficient', action='store_true', help='Enable memory efficient optimizations')
     parser.add_argument('--gradient_checkpointing', action='store_true', help='Enable gradient checkpointing')
     parser.add_argument('--cpu_offload', action='store_true', help='Enable CPU offloading for optimizer states')
+    parser.add_argument('--output_dir', type=str, help='Directory to save output files (defaults to weights/config_name)')
     
     args = parser.parse_args()
     
@@ -306,24 +317,44 @@ def main():
             "dispatch_batches": True
         })
     
+    # Add DeepSpeed config if provided
+    if args.deepspeed:
+        with open(args.deepspeed, 'r') as f:
+            ds_config = json.load(f)
+        accelerator_kwargs["deepspeed_config"] = ds_config
+    
     accelerator = Accelerate(**accelerator_kwargs)
     
-    # Load training config
-    config = TrainingConfig.from_yaml(Path('config') / (args.config + '.yaml'))
-    model_config = GPTConfig.from_yaml(args.config)
+    # Load training config from path (could be absolute or relative)
+    config_path = Path(args.config)
+    if not config_path.exists() or not config_path.is_file():
+        # Try with config/ prefix
+        config_path = Path('config') / f"{args.config}.yaml"
+    
+    config = TrainingConfig.from_yaml(config_path)
+    
+    # Get model config name, defaults to the same as training config
+    model_config_name = args.model_config if args.model_config else args.config
+    model_config = GPTConfig.from_yaml(model_config_name)
     
     if args.resume:
-        config.resume_from = args.resume
+        config.trainer.resume_from = args.resume
     
     # Add memory optimization flags to config
     config.trainer.use_gradient_checkpointing = args.gradient_checkpointing
     config.trainer.memory_efficient = args.memory_efficient
     
+    # Set output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = Path('weights') / args.config
+    
     # Initialize and run trainer
     trainer = DistributedTrainer(
         model_config=model_config,
         training_config=config,
-        output_dir=Path('weights') / args.config,
+        output_dir=output_dir,
         accelerator=accelerator
     )
     
